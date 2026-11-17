@@ -6,16 +6,19 @@
 <title>日切放行</title>
 <script src="/static/vue.global.prod.js"></script>
 <style>
-  :root{--bg:#0b1220;--panel:#121a2b;--line:#243049;--text:#e8eefc;--muted:#93a0b8;--ok:#3ddc97;--bad:#ff6b6b;--accent:#4cc9f0}
+  :root{--bg:#0b1220;--panel:#121a2b;--line:#243049;--text:#e8eefc;--muted:#93a0b8;--ok:#3ddc97;--bad:#ff6b6b;--accent:#4cc9f0;--warn:#f0c24c}
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
   .top{display:flex;align-items:center;gap:18px;padding:14px 20px;border-bottom:1px solid var(--line);background:#0e1626}
-  .brand{font-weight:700;letter-spacing:.08em;font-size:18px}
+  .brand{font-weight:700;letter-spacing:.08em;font-size:18px;white-space:nowrap}
   .brand small{display:block;color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.02em;margin-top:2px}
-  .tabs{display:flex;gap:6px;flex:1}
+  .tabs{display:flex;gap:6px;flex:1;flex-wrap:wrap}
   .tabs button{background:transparent;border:1px solid transparent;color:var(--muted);padding:8px 12px;border-radius:999px;cursor:pointer}
   .tabs button.on{color:var(--text);border-color:var(--line);background:#18233a}
+  .cata-note{color:var(--warn);font-size:12px;border:1px dashed #4a3d1c;border-radius:8px;padding:5px 9px;white-space:nowrap}
   .user{color:var(--muted);font-size:13px}
   .ghost{background:#18233a;border:1px solid var(--line);color:var(--text);padding:7px 10px;border-radius:8px;cursor:pointer}
+  .policy{margin:12px 20px 0;padding:9px 14px;border:1px solid #2a3a5c;border-left:4px solid var(--accent);border-radius:8px;background:#0f1930;color:#c9d4ea;font-size:13px;line-height:1.6}
+  .policy b{color:var(--accent)}
   main{padding:18px 20px 28px}
   .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
@@ -29,10 +32,18 @@
   .mono{font-family:Consolas,"Courier New",monospace}
   .tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;background:#1b2a22;color:var(--ok)}
   .tag.bad{background:#2a1518;color:var(--bad)}
+  .tag.warn{background:#2a2412;color:var(--warn)}
+  .tag.shadow{background:#1c2340;color:#9db4ff}
   .login{max-width:400px;margin:12vh auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px}
   .err{color:var(--bad);min-height:18px;font-size:13px}
   .kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .kpi.kpi4{grid-template-columns:repeat(4,1fr)}
   .kpi .panel{padding:12px}.kpi b{display:block;font-size:22px;margin-top:4px}
+  tr.sel{cursor:pointer}
+  tr.sel:hover td{background:#16203a}
+  .detail{margin-top:14px;border-left:4px solid var(--warn)}
+  .detailgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:13px}
+  .detailgrid div span{display:block;color:var(--muted);font-size:11px;margin-bottom:2px}
 </style>
 </head>
 <body>
@@ -55,10 +66,12 @@ createApp({
     const token=ref(localStorage.getItem('slicegate_token')||'');
     const user=ref(localStorage.getItem('slicegate_user')||'');
     const username=ref('admin'), password=ref('123456'), err=ref(''), tab=ref(0), actionErr=ref('');
-    const slices=ref([]), releases=ref([]), watermarks=ref([]);
+    const slices=ref([]), releases=ref([]), watermarks=ref([]), shadows=ref([]), audits=ref([]);
+    const spec=ref(null), selected=ref(null);
+    const counts=ref({formal:0,shadow:0,current:0,contended:0,audit:0,deviation:0,contention:0});
     const form=ref({slice_no:'SL-2026-11-03-east',biz_date:'2026-11-03',partition_key:'east',row_count:1000,expected_count:1000});
     const releaseSliceId=ref(1), consumer=ref('ads_order');
-    const nav=['切片登记','完整度裁决','下游放行','消费水位'];
+    const nav=['切片登记','完整度裁决','下游放行','水位台','审计台'];
     const completeCnt=computed(()=>slices.value.filter(s=>s.completeness==='完整').length);
     const openCnt=computed(()=>slices.value.filter(s=>s.release_status!=='已放行').length);
     function auth(){return {Authorization:'Bearer '+token.value,'Content-Type':'application/json'};}
@@ -85,13 +98,22 @@ createApp({
       releases.value=Array.isArray(rel.items)?rel.items:[];
       const w=await loadJson('/api/watermarks'); if(w===null) return;
       watermarks.value=Array.isArray(w.items)?w.items:[];
+      const sh=await loadJson('/api/watermarks/shadow'); if(sh===null) return;
+      shadows.value=Array.isArray(sh.items)?sh.items:[];
+      const ov=await loadJson('/api/watermarks/overview'); if(ov===null) return;
+      spec.value=ov.spec||null; counts.value=ov.counts||counts.value;
+      const au=await loadJson('/api/audit'); if(au===null) return;
+      audits.value=Array.isArray(au.items)?au.items:[];
       if(slices.value.length) releaseSliceId.value=slices.value[0].id;
     }
     async function createSlice(){actionErr.value='';const r=await fetch('/api/slices',{method:'POST',headers:auth(),body:JSON.stringify(form.value)});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'失败';await refresh();}
     async function evaluate(id){await fetch('/api/slices/'+id+'/evaluate',{method:'POST',headers:auth()});await refresh();}
-    async function doRelease(){actionErr.value='';const r=await fetch('/api/slices/'+releaseSliceId.value+'/release',{method:'POST',headers:auth(),body:JSON.stringify({consumer:consumer.value})});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'放行失败';await refresh();}
+    async function doRelease(){actionErr.value='';const r=await fetch('/api/slices/'+releaseSliceId.value+'/release',{method:'POST',headers:auth(),body:JSON.stringify({consumer:consumer.value})});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'放行失败';else if(j.contended)actionErr.value='已占坑排队执行：影子争用（后手）';await refresh();}
+    async function doTrial(){actionErr.value='';const r=await fetch('/api/slices/'+releaseSliceId.value+'/trial',{method:'POST',headers:auth(),body:JSON.stringify({consumer:consumer.value})});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'试跑失败';else actionErr.value='试跑已写影子水位（隔离区，不进正式集合）';await refresh();}
+    async function doPromote(id){actionErr.value='';const r=await fetch('/api/watermarks/'+id+'/promote',{method:'POST',headers:auth()});const j=await r.json();if(!r.ok)actionErr.value=j.detail||'晋升失败';else if(j.contended)actionErr.value='晋升已占坑排队执行：影子争用（后手）';await refresh();}
+    function pick(w){selected.value=w;}
     onMounted(()=>{if(token.value)refresh();});
-    return {token,user,username,password,err,tab,nav,slices,releases,watermarks,form,releaseSliceId,consumer,actionErr,completeCnt,openCnt,login,logout,createSlice,evaluate,doRelease};
+    return {token,user,username,password,err,tab,nav,slices,releases,watermarks,shadows,audits,spec,counts,selected,form,releaseSliceId,consumer,actionErr,completeCnt,openCnt,login,logout,createSlice,evaluate,doRelease,doTrial,doPromote,pick};
   },
   template:`
   <div v-if="!token" class="login">
@@ -103,8 +125,10 @@ createApp({
     <div class="top">
       <div class="brand">日切放行<small>切片 → 完整度 → 放行 → 水位</small></div>
       <div class="tabs"><button v-for="(n,i) in nav" :key="n" :class="{on:tab===i}" @click="tab=i">{{n}}</button></div>
+      <span class="cata-note" v-if="spec">旁注：影子水位隔离中 · {{spec.mode}}锁定 · 不进正式集合</span>
       <div class="user">{{user}}</div><button class="ghost" @click="logout">退出</button>
     </div>
+    <div class="policy" v-if="spec"><b>策略条 · 影子隔离说明：</b>{{spec.text}}（{{spec.mode}}锁定 · 锁定日 {{spec.spec_date}} · 当天不许换）</div>
     <main>
       <div class="kpi">
         <div class="panel">切片总数<b class="mono">{{slices.length}}</b></div>
@@ -145,6 +169,7 @@ createApp({
           <label>切片</label><select v-model.number="releaseSliceId"><option v-for="s in slices" :value="s.id">{{s.slice_no}}（{{s.completeness}}）</option></select>
           <label>下游</label><input v-model="consumer"/>
           <button class="primary" @click="doRelease">放行</button>
+          <button class="ghost" style="margin-left:8px" @click="doTrial">试跑（写影子水位）</button>
           <div class="err">{{actionErr}}</div>
         </div>
         <div class="panel">
@@ -153,10 +178,61 @@ createApp({
           <tbody><tr v-for="r in releases" :key="r.id"><td class="mono">{{r.slice_no}}</td><td>{{r.consumer}}</td><td>{{r.status}}</td><td class="mono">{{r.created_at}}</td></tr></tbody></table>
         </div>
       </div>
-      <div v-show="tab===3" class="panel">
-        <h2>消费水位</h2>
-        <table><thead><tr><th>消费方</th><th>业务日</th><th>水位</th><th>来源切片</th></tr></thead>
-        <tbody><tr v-for="w in watermarks" :key="w.id"><td>{{w.consumer}}</td><td>{{w.biz_date}}</td><td class="mono">{{w.watermark}}</td><td class="mono">{{w.source_slice}}</td></tr></tbody></table>
+      <div v-show="tab===3">
+        <div class="kpi kpi4">
+          <div class="panel">正式水位<b class="mono">{{counts.formal}}</b></div>
+          <div class="panel">现行（正式）<b class="mono">{{counts.current}}</b></div>
+          <div class="panel">影子水位 · 隔离<b class="mono">{{counts.shadow}}</b></div>
+          <div class="panel">影子争用<b class="mono">{{counts.contended}}</b></div>
+        </div>
+        <div class="grid">
+          <div class="panel">
+            <h2>正式水位（现行消费进度 · 已过滤影子）</h2>
+            <table><thead><tr><th>消费方</th><th>业务日</th><th>水位</th><th>来源切片</th><th>状态</th></tr></thead>
+            <tbody><tr v-for="w in watermarks" :key="'f'+w.id" class="sel" @click="pick(w)">
+              <td>{{w.consumer}}</td><td>{{w.biz_date}}</td><td class="mono">{{w.watermark}}</td><td class="mono">{{w.source_slice}}</td>
+              <td><span class="tag" v-if="w.is_current">现行</span> <span class="tag warn" v-if="w.contended">影子争用</span></td>
+            </tr></tbody></table>
+          </div>
+          <div class="panel">
+            <h2>影子水位（隔离区 · 不进正式集合）</h2>
+            <table><thead><tr><th>消费方</th><th>业务日</th><th>水位</th><th>来源切片</th><th></th></tr></thead>
+            <tbody><tr v-for="w in shadows" :key="'s'+w.id" class="sel" @click="pick(w)">
+              <td>{{w.consumer}}</td><td>{{w.biz_date}}</td><td class="mono">{{w.watermark}}</td><td class="mono">{{w.source_slice}}</td>
+              <td><span class="tag shadow">影子</span> <button class="ghost" @click.stop="doPromote(w.id)">晋升</button></td>
+            </tr></tbody></table>
+          </div>
+        </div>
+        <div class="panel detail" v-if="selected">
+          <h2>详情条 · 水位 #{{selected.id}}</h2>
+          <div class="detailgrid">
+            <div><span>消费方</span>{{selected.consumer}}</div>
+            <div><span>业务日</span>{{selected.biz_date}}</div>
+            <div><span>水位</span><b class="mono">{{selected.watermark}}</b></div>
+            <div><span>来源切片</span><span class="mono">{{selected.source_slice}}</span></div>
+            <div><span>口径</span>{{selected.kind}}</div>
+            <div><span>现行</span>{{selected.is_current?'是':'否'}}</div>
+            <div><span>影子争用</span>{{selected.contended?'是（后手）':'否'}}</div>
+            <div><span>备注</span>{{selected.note||'—'}}</div>
+          </div>
+        </div>
+      </div>
+      <div v-show="tab===4">
+        <div class="kpi kpi4">
+          <div class="panel">审计事件<b class="mono">{{counts.audit}}</b></div>
+          <div class="panel">影子争用<b class="mono">{{counts.contention}}</b></div>
+          <div class="panel">口径偏离<b class="mono">{{counts.deviation}}</b></div>
+          <div class="panel">正式 / 影子<b class="mono">{{counts.formal}} / {{counts.shadow}}</b></div>
+        </div>
+        <div class="panel">
+          <h2>审计流水（与水位台同源对账，不各认各的数）</h2>
+          <table><thead><tr><th>时间</th><th>事件</th><th>操作人</th><th>详情</th></tr></thead>
+          <tbody><tr v-for="a in audits" :key="'a'+a.id">
+            <td class="mono">{{a.created_at}}</td>
+            <td><span class="tag" :class="{bad:a.event==='影子口径偏了',warn:a.event==='影子争用'}">{{a.event}}</span></td>
+            <td>{{a.actor}}</td><td>{{a.detail}}</td>
+          </tr></tbody></table>
+        </div>
       </div>
     </main>
   </div>`

@@ -32,6 +32,16 @@
 - 重切失败整笔回滚 vs 保留已完整分区
 - 放行与水位同步闸 vs 异步放行后纠偏
 
+## 影子隔离（乙锁定）
+
+试跑只写影子水位（强制影子标记），正式展示集合默认过滤影子；晋升原子切换标记、禁止双现行并存；
+晋升与放行同时提交占坑排队、后手标明影子争用；偏离说明即拒并记「影子口径偏了」。
+口径全文见 `docs/影子隔离说明.md`，说明写入后当天不许换。
+
+- 正式水位：`GET /api/watermarks`（只含正式行）　影子隔离区：`GET /api/watermarks/shadow`
+- 试跑：`POST /api/slices/{id}/trial`　晋升：`POST /api/watermarks/{id}/promote`
+- 隔离说明：`GET/POST /api/watermarks/isolation`　同源对账：`GET /api/watermarks/overview`　审计：`GET /api/audit`
+
 ## 启动（一键）
 
 `powershell
